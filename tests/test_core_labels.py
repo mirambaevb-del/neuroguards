@@ -4,6 +4,7 @@ import unittest
 from neuroguard_core import (
     POSTICTAL_EXCLUSION_SECONDS,
     label_window,
+    window_exclusion_reason,
 )
 
 
@@ -41,6 +42,13 @@ class LabelWindowTests(unittest.TestCase):
     def test_overlapping_or_unsorted_seizure_intervals_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "sorted and non-overlapping"):
             label_window(10, 14, [(10, 30), (25, 40)])
+
+
+    def test_exclusion_reason_distinguishes_postictal_from_seizure_boundary(self):
+        intervals = [(90, 120)]
+        self.assertEqual(window_exclusion_reason(124, 128, intervals), "postictal_exclusion")
+        self.assertEqual(window_exclusion_reason(88, 92, intervals), "seizure_boundary")
+        self.assertIsNone(window_exclusion_reason(50, 54, intervals))
 
     def test_invalid_postictal_duration_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "finite and non-negative"):
