@@ -82,6 +82,13 @@ def candidate_preictal_label(start: float, end: float,
         if fully_inside_preictal:
             candidate_events.append(onset)
 
+    # Any seizure inside the minimum-warning exclusion interval vetoes the
+    # window, even if a later seizure would otherwise make it look preictal.
+    # This prevents a distant event from masking an imminent event.
+    minimum_warning_end = end + protocol.minimum_warning_seconds
+    if any(end <= onset < minimum_warning_end for onset, _ in seizures):
+        return None
+
     # A candidate positive is confirmed by observing the uninterrupted EEG
     # through its onset and having verified annotations through that onset.
     for onset in candidate_events:
