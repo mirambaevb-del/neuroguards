@@ -178,5 +178,5 @@ parser.add_argument(
 args = parser.parse_args()
 path = args.output
 path.parent.mkdir(parents=True, exist_ok=True)
-path.write_text(json.dumps(notebook, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
+path.write_text(json.dumps(notebook, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 print(path)
