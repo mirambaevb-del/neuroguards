@@ -16,6 +16,22 @@ class CandidatePreictalLabelTests(unittest.TestCase):
         )
         self.assertEqual(result, 1)
 
+    def test_positive_requires_recording_to_extend_beyond_seizure_onset(self):
+        result = candidate_preictal_label(
+            300, 304, [(1800, 1860)],
+            continuous_intervals=[(0, 1800)],
+            annotation_verified_through=1800,
+        )
+        self.assertIsNone(result)
+
+    def test_overlapping_seizure_intervals_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "sorted and non-overlapping"):
+            candidate_preictal_label(
+                100, 104, [(500, 700), (650, 750)],
+                continuous_intervals=[(0, 2000)],
+                annotation_verified_through=2000,
+            )
+
     def test_negative_requires_full_future_horizon(self):
         result = candidate_preictal_label(
             100, 104, [],
