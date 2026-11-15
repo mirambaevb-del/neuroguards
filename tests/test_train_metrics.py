@@ -35,6 +35,18 @@ class EventMetricsTests(unittest.TestCase):
         self.assertAlmostEqual(result["interictal_exposure_hours"], 16 / 3600)
         self.assertAlmostEqual(result["false_alarms_per_interictal_hour"], 3 / (16 / 3600))
 
+    def test_false_alarm_runs_are_order_independent_and_use_window_end(self):
+        metadata = [
+            {"file": "a.edf", "start_seconds": 4, "end_seconds": 8},
+            {"file": "a.edf", "start_seconds": 0, "end_seconds": 4},
+            {"file": "a.edf", "start_seconds": 12, "end_seconds": 16},
+        ]
+        # All are positive interictal windows. The first two are contiguous
+        # despite their input order; the third starts a new run after a gap.
+        result = event_metrics([], metadata, np.array([0, 0, 0]),
+                               np.array([1, 1, 1]), self.config)
+        self.assertEqual(result["false_alarm_runs"], 2)
+
     def test_nonpositive_window_separates_two_false_alarm_runs(self):
         metadata = [
             {"file": "a.edf", "start_seconds": 0, "end_seconds": 4},
