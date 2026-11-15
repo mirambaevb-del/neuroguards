@@ -17,8 +17,12 @@ class EventMetricsTests(unittest.TestCase):
                           np.array([0, 0]), self.config)
 
     def test_rejects_non_binary_labels(self):
+        metadata = [
+            {"file": "a.edf", "start_seconds": 0, "end_seconds": 4},
+            {"file": "a.edf", "start_seconds": 4, "end_seconds": 8},
+        ]
         with self.assertRaisesRegex(ValueError, "binary labels"):
-            event_metrics([], [{"file": "a.edf"}], np.array([0, 2]),
+            event_metrics([], metadata, np.array([0, 2]),
                           np.array([0, 1]), self.config)
 
     def test_false_alarm_runs_split_at_time_gaps_and_file_boundaries(self):
