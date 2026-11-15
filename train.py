@@ -199,6 +199,32 @@ def save_plots(results: Path, model, x: np.ndarray, y: np.ndarray, scores: np.nd
             raw.close()
 
 
+
+def validate_training_audit(audit: dict) -> tuple[int, int]:
+    """Allow training on verified recordings while reporting excluded EDFs.
+
+    Rejected recordings are never relabeled as interictal. Only entries in
+    accepted_recordings (which have validated EDF metadata and annotations)
+    are eligible for the participant-level split and window extraction.
+    """
+    status = audit.get("status")
+    accepted = audit.get("accepted_recordings")
+    rejected = audit.get("rejected_recordings")
+    if status != "audited":
+        raise SystemExit(
+            f"Cannot train: dataset audit status is {status!r}. "
+            "Review results/dataset_audit.json."
+        )
+    if not isinstance(accepted, list) or not accepted:
+        raise SystemExit(
+            "Cannot train: no EDF recordings passed annotation and signal validation. "
+            "Review results/dataset_audit.json."
+        )
+    if not isinstance(rejected, list):
+        raise SystemExit("Cannot train: dataset audit has no valid rejected_recordings list.")
+    return len(accepted), len(rejected)
+
+
 def main():
     parser = argparse.ArgumentParser(description="NeuroGuard patient-independent research baseline")
     parser.add_argument("--data", default="/content/neuroguard_data")
@@ -216,8 +242,13 @@ def main():
     if not args.train:
         print("Audit-only. Add --train to train on actual EEG recordings.")
         return
-    if audit["status"] != "audited" or audit["rejected_recordings"]:
-        raise SystemExit("Cannot train: missing/invalid data or rejected recordings. Review results/dataset_audit.json.")
+    accepted_count, rejected_count = validate_training_audit(audit)
+    if rejected_count:
+        print(
+            f"WARNING: excluding {rejected_count} rejected EDF recording(s); "
+            f"training will use only {accepted_count} verified recording(s). "
+            "Rejected files are NOT treated as interictal."
+        )
     split_patients = None
     if args.split_json:
         with Path(args.split_json).open("r", encoding="utf-8") as handle:

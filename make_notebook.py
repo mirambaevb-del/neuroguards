@@ -1,6 +1,7 @@
 """Generate the standalone Colab teaching notebook from this checked-in recipe."""
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 import textwrap
@@ -76,7 +77,7 @@ cells = [
     print('Audit status:', audit['status'])
     for key in ['edf_files_found','edf_files_readable','patients','verified_seizures',
                 'recording_hours','ictal_windows','interictal_windows',
-                'boundary_windows_excluded','rejected_recordings']:
+                'seizure_boundary_windows_excluded', 'postictal_windows_excluded','rejected_recordings']:
         print(key, ':', audit[key])
     """),
     markdown("""## Этап 4. Признаки EEG
@@ -99,12 +100,12 @@ cells = [
     Train, validation и test формируются из непересекающихся пациентов **после аудита**. По validation выбираем параметры Random Forest или Logistic Regression, затем проверяем выбранную модель на независимом test. Если EDF или официальные summaries отсутствуют, обучение **не запускается**.
     """),
     code("""import subprocess, sys
-    if audit['status'] == 'audited' and not audit['rejected_recordings']:
+    if audit['status'] == 'audited' and audit['accepted_recordings']:
         print('Real EEG available; starting real training...')
         subprocess.run([sys.executable, 'train.py', '--data', str(data_dir),
                         '--out', str(output_dir), '--train'], check=True)
     else:
-        print('Real training SKIPPED: missing/invalid dataset. See results/dataset_audit.json')
+        print('Real training SKIPPED: no verified EDF dataset. See results/dataset_audit.json')
     """),
     markdown("## Этап 7. Проверка инференса без нового обучения"),
     code("""from inference import NeuroGuardDetector
@@ -112,7 +113,7 @@ cells = [
     if model_path.exists():
         detector = NeuroGuardDetector(output_dir/'model')
         print('Loaded:', detector.manifest)
-        test_patients = detector.manifest.get('held_out_patients', [])
+        test_patients = detector.manifest.get('held_out_cases', [])
         test_record = next((r for r in audit['accepted_recordings'] if r['patient'] in test_patients), None)
         if test_record:
             from neuroguard_core import load_edf, select_channels
@@ -167,6 +168,15 @@ notebook = {
     "nbformat": 4, "nbformat_minor": 4,
 }
 
-path = Path(__file__).with_name("NeuroGuard_AI_Final.ipynb")
-path.write_text(json.dumps(notebook, indent=2, ensure_ascii=False), encoding="utf-8")
+parser = argparse.ArgumentParser(description="Generate the NeuroGuard Colab notebook")
+parser.add_argument(
+    "--output",
+    type=Path,
+    default=Path(__file__).with_name("NeuroGuard_AI_Final.ipynb"),
+    help="Output notebook path (defaults beside this script)",
+)
+args = parser.parse_args()
+path = args.output
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(json.dumps(notebook, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 print(path)
