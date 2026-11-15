@@ -124,7 +124,7 @@ POSTICTAL_EXCLUSION_SECONDS = 30 * 60  # Research protocol choice; not a clinica
 
 def label_window(start: float, end: float, intervals: list[tuple[float, float]],
                  postictal_exclusion_seconds: float = POSTICTAL_EXCLUSION_SECONDS) -> int | None:
-    """Return 1=fully ictal, 0=verified interictal, None=excluded/ambiguous.
+    """Return 1=fully ictal, 0=interictal candidate, None=excluded/ambiguous.
 
     Windows overlapping the configured postictal interval [seizure_end,
     seizure_end + exclusion) are excluded rather than mislabeled interictal.
