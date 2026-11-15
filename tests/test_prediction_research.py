@@ -41,6 +41,14 @@ class CandidatePreictalLabelTests(unittest.TestCase):
         )
         self.assertIsNone(result)
 
+    def test_seizure_at_window_end_is_not_a_negative(self):
+        result = candidate_preictal_label(
+            100, 104, [(104, 150)],
+            continuous_intervals=[(0, 2000)],
+            annotation_verified_through=2000,
+        )
+        self.assertIsNone(result)
+
     def test_postictal_window_is_excluded(self):
         result = candidate_preictal_label(
             2000, 2004, [(1000, 1500)],
