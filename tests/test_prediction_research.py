@@ -49,6 +49,22 @@ class CandidatePreictalLabelTests(unittest.TestCase):
         )
         self.assertIsNone(result)
 
+    def test_imminent_seizure_vetoes_later_preictal_candidate(self):
+        result = candidate_preictal_label(
+            100, 104, [(404, 450), (1800, 1860)],
+            continuous_intervals=[(0, 2000)],
+            annotation_verified_through=2000,
+        )
+        self.assertIsNone(result)
+
+    def test_seizure_at_window_end_vetoes_later_preictal_candidate(self):
+        result = candidate_preictal_label(
+            100, 104, [(104, 150), (1800, 1860)],
+            continuous_intervals=[(0, 2000)],
+            annotation_verified_through=2000,
+        )
+        self.assertIsNone(result)
+
     def test_postictal_window_is_excluded(self):
         result = candidate_preictal_label(
             2000, 2004, [(1000, 1500)],
