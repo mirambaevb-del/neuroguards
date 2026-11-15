@@ -77,7 +77,7 @@ cells = [
     print('Audit status:', audit['status'])
     for key in ['edf_files_found','edf_files_readable','patients','verified_seizures',
                 'recording_hours','ictal_windows','interictal_windows',
-                'seizure_boundary_windows_excluded','postictal_windows_excluded','rejected_recordings']:
+                'seizure_boundary_windows_excluded', 'postictal_windows_excluded','rejected_recordings']:
         print(key, ':', audit[key])
     """),
     markdown("""## Этап 4. Признаки EEG
