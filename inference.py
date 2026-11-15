@@ -149,7 +149,9 @@ class StreamingEEGSession:
         if not np.isfinite(ordered).all():
             raise ValueError("Streaming EEG contains NaN or Infinity")
         self.buffer = np.concatenate((self.buffer, ordered), axis=1)
-        self.next_packet_seconds = packet_start_seconds + ordered.shape[1] / self.detector.config.sfreq
+        # Advance from the expected timeline, not the received timestamp, so tolerated
+        # sub-sample timestamp jitter cannot accumulate into long-term clock drift.
+        self.next_packet_seconds += ordered.shape[1] / self.detector.config.sfreq
         n = self.buffer.shape[1] // self.detector.config.samples_per_window
         outputs = []
         length = self.detector.config.samples_per_window
