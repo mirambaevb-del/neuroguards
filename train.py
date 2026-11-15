@@ -51,6 +51,15 @@ def event_metrics(records: list[dict], metadata: list[dict], y: np.ndarray,
     False alarm = the START of a consecutive positive run in fully interictal
     windows. Exposure denominator excludes ictal and boundary windows.
     """
+    y = np.asarray(y)
+    prediction = np.asarray(prediction)
+    if y.ndim != 1 or prediction.ndim != 1:
+        raise ValueError("y and prediction must be one-dimensional")
+    if len(metadata) != len(y) or len(prediction) != len(y):
+        raise ValueError("metadata, y, and prediction must have equal lengths")
+    if not np.isin(y, [0, 1]).all() or not np.isin(prediction, [0, 1]).all():
+        raise ValueError("y and prediction must contain only binary labels 0 and 1")
+
     all_events = [(r["file"], onset, offset) for r in records for onset, offset in r["seizures"]]
     latencies, hits, scorable_events = [], 0, 0
     for filename, onset, offset in all_events:
@@ -67,17 +76,38 @@ def event_metrics(records: list[dict], metadata: list[dict], y: np.ndarray,
             hits += 1
             latencies.append(min(positive_ends) - onset)
     unscorable_events = len(all_events) - scorable_events
+    ordered = sorted(
+        zip(metadata, y, prediction),
+        key=lambda item: (item[0]["file"], item[0]["start_seconds"]),
+    )
+    previous_by_file = {}
+    tolerance = 1e-9
+    for m, _, _ in ordered:
+        start, end = float(m["start_seconds"]), float(m["end_seconds"])
+        if not np.isfinite(start) or not np.isfinite(end) or start < 0 or end <= start:
+            raise ValueError("metadata must contain finite, valid window timestamps")
+        if not np.isclose(end - start, config.window_seconds, rtol=0.0, atol=tolerance):
+            raise ValueError("each metadata window must match config.window_seconds")
+        filename = m["file"]
+        previous_end = previous_by_file.get(filename)
+        if previous_end is not None and start < previous_end - tolerance:
+            raise ValueError("metadata windows must not overlap or duplicate within an EDF file")
+        previous_by_file[filename] = end
+
     false_alarms = 0
-    previous_file, previous_start, previous_positive = None, None, False
-    for m, target, pred in zip(metadata, y, prediction):
+    previous_file, previous_end, previous_positive = None, None, False
+    for m, target, pred in ordered:
         if target == 0 and pred == 1:
             contiguous = (previous_positive and previous_file == m["file"] and
-                          previous_start is not None and
-                          abs(m["start_seconds"] - previous_start - config.window_seconds) < 1e-9)
+                          previous_end is not None and
+                          abs(m["start_seconds"] - previous_end) < 1e-9)
             if not contiguous:
                 false_alarms += 1
         previous_positive = (target == 0 and pred == 1)
-        previous_file, previous_start = m["file"], m["start_seconds"]
+        previous_file, previous_end = m["file"], m["end_seconds"]
+    # iter_record_windows emits non-overlapping, fixed-duration windows. Thus
+    # each retained interictal window contributes exactly one window duration;
+    # excluded/invalid windows do not inflate the exposure denominator.
     exposure_h = np.sum(y == 0) * config.window_seconds / 3600.0
     return {
         "annotated_events": len(all_events),

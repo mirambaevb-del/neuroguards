@@ -119,14 +119,57 @@ def parse_summary(text: str) -> dict[str, dict]:
     return records
 
 
-def label_window(start: float, end: float, intervals: list[tuple[float, float]]) -> int | None:
-    """Return 1 for fully ictal, 0 for fully interictal, None for boundary-crossing."""
+POSTICTAL_EXCLUSION_SECONDS = 30 * 60  # Research protocol choice; not a clinical standard.
+
+
+def label_window(start: float, end: float, intervals: list[tuple[float, float]],
+                 postictal_exclusion_seconds: float = POSTICTAL_EXCLUSION_SECONDS) -> int | None:
+    """Return 1=fully ictal, 0=interictal candidate, None=excluded/ambiguous.
+
+    Windows overlapping the configured postictal interval [seizure_end,
+    seizure_end + exclusion) are excluded rather than mislabeled interictal.
+    The 30-minute default is an explicit research-protocol choice and must not
+    be presented as a clinically established recovery period.
+    """
+    if (not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start):
+        raise ValueError("Invalid window timestamps")
+    if (not math.isfinite(postictal_exclusion_seconds) or
+            postictal_exclusion_seconds < 0):
+        raise ValueError("Postictal exclusion must be finite and non-negative")
+
+    previous_offset = -math.inf
+    for onset, offset in intervals:
+        if (not math.isfinite(onset) or not math.isfinite(offset) or
+                onset < 0 or offset <= onset or onset < previous_offset):
+            raise ValueError("Seizure intervals must be valid, sorted and non-overlapping")
+        previous_offset = offset
+
+    # Ictal labels take precedence only for windows fully contained in an event.
     for onset, offset in intervals:
         if start >= onset and end <= offset:
             return 1
         if start < offset and end > onset:
             return None
+
+    # Any overlap with the postictal exclusion interval is unknown, not negative.
+    if postictal_exclusion_seconds > 0 and any(
+        start < offset + postictal_exclusion_seconds and end > offset
+        for _, offset in intervals
+    ):
+        return None
     return 0
+
+
+def window_exclusion_reason(start: float, end: float,
+                            intervals: list[tuple[float, float]],
+                            postictal_exclusion_seconds: float = POSTICTAL_EXCLUSION_SECONDS) -> str | None:
+    """Explain why a window has no binary label; return None for labeled windows."""
+    label = label_window(start, end, intervals, postictal_exclusion_seconds)
+    if label is not None:
+        return None
+    if any(start < offset and end > onset for onset, offset in intervals):
+        return "seizure_boundary"
+    return "postictal_exclusion"
 
 
 def validate_intervals(intervals: list[tuple[float, float]], duration: float) -> None:
@@ -208,7 +251,8 @@ def discover_recordings(data_dir: str | Path, config: Config = Config()) -> dict
         "status": "blocked_missing_dataset" if not root.is_dir() else "audited",
         "dataset_path": str(root), "edf_files_found": len(files), "edf_files_readable": 0,
         "patients": [], "verified_seizures": 0, "recording_hours": 0.0,
-        "ictal_windows": 0, "interictal_windows": 0, "boundary_windows_excluded": 0,
+        "ictal_windows": 0, "interictal_windows": 0,
+        "seizure_boundary_windows_excluded": 0, "postictal_windows_excluded": 0,
         "missing_or_invalid_annotations": [], "rejected_recordings": [],
         "accepted_recordings": [], "class_distribution": {},
         "annotation_source": "CHB-MIT patient summary text, checked against EDF duration",
@@ -248,16 +292,22 @@ def discover_recordings(data_dir: str | Path, config: Config = Config()) -> dict
                 validate_intervals(entry["intervals"], duration)
             finally:
                 raw.close()
-            counts = {"ictal": 0, "interictal": 0, "boundary": 0}
+            counts = {"ictal": 0, "interictal": 0, "seizure_boundary": 0, "postictal_exclusion": 0}
             for i in range(math.floor(duration / config.window_seconds)):
                 start = i * config.window_seconds
-                label = label_window(start, start + config.window_seconds, entry["intervals"])
-                counts["boundary" if label is None else ("ictal" if label else "interictal")] += 1
+                end = start + config.window_seconds
+                label = label_window(start, end, entry["intervals"])
+                if label is None:
+                    reason = window_exclusion_reason(start, end, entry["intervals"])
+                    counts[reason] += 1
+                else:
+                    counts["ictal" if label else "interictal"] += 1
             audit["verified_seizures"] += len(entry["intervals"])
             audit["recording_hours"] += duration / 3600.0
             audit["ictal_windows"] += counts["ictal"]
             audit["interictal_windows"] += counts["interictal"]
-            audit["boundary_windows_excluded"] += counts["boundary"]
+            audit["seizure_boundary_windows_excluded"] += counts["seizure_boundary"]
+            audit["postictal_windows_excluded"] += counts["postictal_exclusion"]
             audit["accepted_recordings"].append({
                 "file": str(path), "patient": patient, "duration_seconds": duration,
                 "channels_actual": ch, "seizures": entry["intervals"], "window_counts": counts,
@@ -288,7 +338,8 @@ def iter_record_windows(record: dict, config: Config = Config(),
             if target is None:
                 if rejected_windows is not None:
                     rejected_windows.append({"file": record["file"], "start_seconds": start,
-                                             "end_seconds": end, "reason": "crosses_seizure_boundary"})
+                                             "end_seconds": end,
+                                             "reason": window_exclusion_reason(start, end, record["seizures"])})
                 continue
             first = idx * config.samples_per_window
             try:
