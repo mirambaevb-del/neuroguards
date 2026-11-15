@@ -16,12 +16,12 @@ def fake_detector():
     detector = NeuroGuardDetector.__new__(NeuroGuardDetector)
     detector.config = SimpleNamespace(
         channels=tuple(CHANNELS), sfreq=256.0,
-        samples_per_window=4, window_seconds=4.0,
+        samples_per_window=4, window_seconds=4.0 / 256.0,
     )
     detector.manifest = {"version": "test"}
     detector._predict_window = lambda window, start: {
         "label": "INTERICTAL", "start_seconds": start,
-        "end_seconds": start + 4.0, "status": "ok",
+        "end_seconds": start + 4.0 / 256.0, "status": "ok",
     }
     return detector
 
