@@ -43,7 +43,7 @@ jobs:
           import hashlib, os, pathlib, subprocess, zipfile
           root = pathlib.Path.cwd()
           commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-          tracked = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\\0")
+          tracked = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0")
           files = sorted(p for p in tracked if p and pathlib.Path(p).is_file())
           archive = pathlib.Path("dist/NeuroGuard_Verified.zip")
           hashes = []
@@ -52,8 +52,8 @@ jobs:
                   data = pathlib.Path(name).read_bytes()
                   z.writestr("NeuroGuard_Final/" + name, data)
                   hashes.append(f"{hashlib.sha256(data).hexdigest()}  {name}")
-              z.writestr("NeuroGuard_Final/SOURCE_COMMIT.txt", commit + "\\n")
-              z.writestr("NeuroGuard_Final/SHA256SUMS.txt", "\\n".join(hashes) + "\\n")
+              z.writestr("NeuroGuard_Final/SOURCE_COMMIT.txt", commit + "\n")
+              z.writestr("NeuroGuard_Final/SHA256SUMS.txt", "\n".join(hashes) + "\n")
           with zipfile.ZipFile(archive) as z:
               bad = z.testzip()
               if bad:
