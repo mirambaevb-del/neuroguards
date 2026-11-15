@@ -51,6 +51,15 @@ def event_metrics(records: list[dict], metadata: list[dict], y: np.ndarray,
     False alarm = the START of a consecutive positive run in fully interictal
     windows. Exposure denominator excludes ictal and boundary windows.
     """
+    y = np.asarray(y)
+    prediction = np.asarray(prediction)
+    if y.ndim != 1 or prediction.ndim != 1:
+        raise ValueError("y and prediction must be one-dimensional")
+    if len(metadata) != len(y) or len(prediction) != len(y):
+        raise ValueError("metadata, y, and prediction must have equal lengths")
+    if not np.isin(y, [0, 1]).all() or not np.isin(prediction, [0, 1]).all():
+        raise ValueError("y and prediction must contain only binary labels 0 and 1")
+
     all_events = [(r["file"], onset, offset) for r in records for onset, offset in r["seizures"]]
     latencies, hits, scorable_events = [], 0, 0
     for filename, onset, offset in all_events:
