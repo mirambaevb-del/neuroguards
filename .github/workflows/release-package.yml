@@ -1,0 +1,76 @@
+name: Build verified NeuroGuard archive
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/release-package.yml"
+      - "neuroguard_core.py"
+      - "train.py"
+      - "inference.py"
+      - "api.py"
+      - "prediction_research.py"
+      - "NeuroGuard_AI_Final.ipynb"
+      - "tests/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact source commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run complete unit test suite
+        run: python -m unittest discover -s tests -v
+      - name: Build archive with source commit and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          python - <<'PY'
+          import hashlib, os, pathlib, subprocess, zipfile
+          root = pathlib.Path.cwd()
+          commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          tracked = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0")
+          files = sorted(p for p in tracked if p and pathlib.Path(p).is_file())
+          archive = pathlib.Path("dist/NeuroGuard_Verified.zip")
+          hashes = []
+          with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+              for name in files:
+                  data = pathlib.Path(name).read_bytes()
+                  z.writestr("NeuroGuard_Final/" + name, data)
+                  hashes.append(f"{hashlib.sha256(data).hexdigest()}  {name}")
+              z.writestr("NeuroGuard_Final/SOURCE_COMMIT.txt", commit + "\n")
+              z.writestr("NeuroGuard_Final/SHA256SUMS.txt", "\n".join(hashes) + "\n")
+          with zipfile.ZipFile(archive) as z:
+              bad = z.testzip()
+              if bad:
+                  raise SystemExit(f"ZIP integrity check failed: {bad}")
+              names = z.namelist()
+              required = ["NeuroGuard_Final/neuroguard_core.py", "NeuroGuard_Final/train.py",
+                          "NeuroGuard_Final/inference.py", "NeuroGuard_Final/api.py",
+                          "NeuroGuard_Final/SOURCE_COMMIT.txt", "NeuroGuard_Final/SHA256SUMS.txt"]
+              missing = [x for x in required if x not in names]
+              if missing:
+                  raise SystemExit(f"Archive missing required files: {missing}")
+          print(f"Built {archive} from {commit}; {len(files)} tracked files.")
+          PY
+      - name: Upload verified archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeuroGuard-Verified-${{ github.sha }}
+          path: dist/NeuroGuard_Verified.zip
+          if-no-files-found: error
+          retention-days: 30
