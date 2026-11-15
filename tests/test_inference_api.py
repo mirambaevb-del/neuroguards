@@ -84,6 +84,12 @@ class StreamingContinuityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Non-contiguous EEG packet"):
             self.push(0.02)
 
+    def test_subsample_timestamp_jitter_does_not_accumulate(self):
+        jitter = 0.0005
+        self.push(jitter)
+        self.push(2 / 256 + jitter)
+        self.assertAlmostEqual(self.session.next_packet_seconds, 4 / 256)
+
     def test_overlapping_or_out_of_order_packet_is_rejected(self):
         self.push(0.0)
         with self.assertRaisesRegex(ValueError, "Non-contiguous EEG packet"):
