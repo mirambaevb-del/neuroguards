@@ -41,6 +41,10 @@ class NotebookContractTests(unittest.TestCase):
                     for target in node.targets
                 ):
                     audit_keys.update(_dict_keys(node.value))
+                elif (isinstance(node, ast.AnnAssign)
+                      and isinstance(node.target, ast.Name)
+                      and node.target.id == "audit"):
+                    audit_keys.update(_dict_keys(node.value))
         used_keys = set(re.findall(r"\baudit\[['\"]([^'\"]+)['\"]\]", _notebook_code()))
         self.assertTrue(audit_keys, "Could not locate audit schema in discover_recordings")
         self.assertTrue(used_keys, "Could not locate audit field references in notebook")
