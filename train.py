@@ -112,7 +112,8 @@ def evaluate(model, x: np.ndarray, y: np.ndarray, metadata: list[dict],
 
 
 def save_plots(results: Path, model, x: np.ndarray, y: np.ndarray, scores: np.ndarray,
-               comparison: dict, first_record: dict | None = None):
+               comparison: dict, first_record: dict | None = None,
+               held_out_patients: list[str] | None = None):
     disp = ConfusionMatrixDisplay.from_predictions(y, model.predict(x), labels=[0, 1],
                                                    display_labels=["Interictal", "Ictal"], cmap="Blues")
     disp.figure_.savefig(results / "confusion_matrix.png", dpi=150, bbox_inches="tight")
@@ -120,7 +121,8 @@ def save_plots(results: Path, model, x: np.ndarray, y: np.ndarray, scores: np.nd
     if len(np.unique(y)) == 2:
         fpr, tpr, _ = roc_curve(y, scores)
         plt.figure()
-        plt.plot(fpr, tpr, label="Held-out CHB03")
+        patient_label = ", ".join(held_out_patients or []) or "unspecified patients"
+        plt.plot(fpr, tpr, label=f"Held-out patients: {patient_label}")
         plt.plot([0, 1], [0, 1], "--", color="gray")
         plt.xlabel("False positive rate"); plt.ylabel("True positive rate")
         plt.legend(); plt.tight_layout()
@@ -158,6 +160,7 @@ def main():
     parser.add_argument("--data", default="/content/neuroguard_data")
     parser.add_argument("--out", default=str(Path(__file__).resolve().parent))
     parser.add_argument("--train", action="store_true", help="Fit models only if real labeled EDF data exists")
+    parser.add_argument("--split-json", help="Optional JSON file with disjoint train/validation/test patient lists")
     args = parser.parse_args()
     out = Path(args.out).resolve()
     results, model_dir = out / "results", out / "model"
@@ -171,12 +174,19 @@ def main():
         return
     if audit["status"] != "audited" or audit["rejected_recordings"]:
         raise SystemExit("Cannot train: missing/invalid data or rejected recordings. Review results/dataset_audit.json.")
-    train_records, val_records, test_records = split_records_three_way(audit["accepted_recordings"])
+    split_patients = None
+    if args.split_json:
+        with Path(args.split_json).open("r", encoding="utf-8") as handle:
+            split_patients = json.load(handle)
+        if not isinstance(split_patients, dict):
+            raise SystemExit("--split-json must contain an object with train, validation and test lists")
+    train_records, val_records, test_records = split_records_three_way(
+        audit["accepted_recordings"], split_patients=split_patients)
     split_ids = {"train": sorted({r["patient"] for r in train_records}),
                  "validation": sorted({r["patient"] for r in val_records}),
                  "test": sorted({r["patient"] for r in test_records})}
     write_json(results / "patient_split.json", {"patients": split_ids,
-                                                "method": "Deterministic proposal chosen after EDF audit",
+                                                "method": "User-supplied patient split" if split_patients else "Deterministic proposal chosen after EDF audit",
                                                 "warning": "Review suitability; only 3 patients gives very weak external validation"})
     x_train, y_train, metadata_train, rejected_train = load_feature_matrix(train_records, config)
     x_val, y_val, metadata_val, rejected_val = load_feature_matrix(val_records, config)
@@ -235,7 +245,8 @@ def main():
     write_json(results / "validation_comparison.json", validation_comparison)
     write_json(results / "test_metrics.json", test_metrics)
     save_plots(results, chosen, x_test, y_test, chosen_scores, validation_comparison,
-               next((r for r in test_records if r["seizures"]), None))
+               next((r for r in test_records if r["seizures"]), None),
+               held_out_patients=split_ids["test"])
     print(f"Saved trained model and actual held-out metrics to {out}")
 
 
