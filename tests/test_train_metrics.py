@@ -83,6 +83,29 @@ class EventMetricsTests(unittest.TestCase):
         self.assertEqual(result["event_sensitivity_scorable"], None)
         self.assertEqual(result["event_sensitivity_all_annotated"], 0)
 
+    def test_rejects_window_duration_not_matching_config(self):
+        metadata = [
+            {"file": "a.edf", "start_seconds": 0, "end_seconds": 3},
+        ]
+        with self.assertRaisesRegex(ValueError, "match config.window_seconds"):
+            event_metrics([], metadata, np.array([0]), np.array([0]), self.config)
+
+    def test_rejects_overlapping_windows_within_same_file(self):
+        metadata = [
+            {"file": "a.edf", "start_seconds": 0, "end_seconds": 4},
+            {"file": "a.edf", "start_seconds": 2, "end_seconds": 6},
+        ]
+        with self.assertRaisesRegex(ValueError, "must not overlap or duplicate"):
+            event_metrics([], metadata, np.array([0, 0]), np.array([0, 0]), self.config)
+
+    def test_rejects_duplicate_windows_within_same_file(self):
+        metadata = [
+            {"file": "a.edf", "start_seconds": 0, "end_seconds": 4},
+            {"file": "a.edf", "start_seconds": 0, "end_seconds": 4},
+        ]
+        with self.assertRaisesRegex(ValueError, "must not overlap or duplicate"):
+            event_metrics([], metadata, np.array([0, 0]), np.array([0, 0]), self.config)
+
 
 if __name__ == "__main__":
     unittest.main()
