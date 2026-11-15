@@ -91,7 +91,10 @@ def model_info(request: Request):
     check_key(request)
     d = detector_or_503()
     return {"status": "ready", "task": "binary_seizure_detection", "version": d.manifest.get("version"),
-            "training_patients": d.manifest.get("training_patients"),
+            "training_cases": d.manifest.get("training_cases", []),
+            "training_subjects": d.manifest.get("training_subjects", []),
+            "held_out_cases": d.manifest.get("held_out_cases", []),
+            "held_out_subjects": d.manifest.get("held_out_subjects", []),
             "channels": list(d.config.channels), "sample_rate": d.config.sfreq,
             "window_seconds": d.config.window_seconds, "calibrated_probabilities": False,
             "clinical_validation": False}
