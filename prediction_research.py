@@ -57,10 +57,14 @@ def candidate_preictal_label(start: float, end: float,
     for left, right in continuous_intervals:
         if not math.isfinite(left) or not math.isfinite(right) or left < 0 or right <= left:
             raise ValueError("Invalid continuous recording interval")
+    previous_offset = -math.inf
     for onset, offset in seizures:
         if (not math.isfinite(onset) or not math.isfinite(offset) or
                 onset < 0 or offset <= onset):
             raise ValueError("Invalid seizure interval")
+        if onset < previous_offset:
+            raise ValueError("Seizure intervals must be sorted and non-overlapping")
+        previous_offset = offset
 
     # The EEG window itself must be inside one uninterrupted recording segment.
     if not _covered_by_one_interval(start, end, continuous_intervals):
@@ -92,8 +96,11 @@ def candidate_preictal_label(start: float, end: float,
     # A candidate positive is confirmed by observing the uninterrupted EEG
     # through its onset and having verified annotations through that onset.
     for onset in candidate_events:
-        if (annotation_verified_through >= onset and
-                _covered_by_one_interval(start, onset, continuous_intervals)):
+        onset_is_recorded = any(
+            left <= start and onset < right and end <= right
+            for left, right in continuous_intervals
+        )
+        if annotation_verified_through >= onset and onset_is_recorded:
             return 1
 
     # If a seizure occurs within the future outer horizon but this window did
