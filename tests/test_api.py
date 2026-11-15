@@ -10,7 +10,13 @@ import api
 
 class FakeDetector:
     def __init__(self, model_dir=None):
-        self.manifest = {"version": "test-model", "training_patients": ["chb01"]}
+        self.manifest = {
+            "version": "test-model",
+            "training_cases": ["chb01", "chb02"],
+            "training_subjects": ["subject_chb01_chb21", "chb02"],
+            "held_out_cases": ["chb03"],
+            "held_out_subjects": ["chb03"],
+        }
         self.config = type("Config", (), {
             "channels": ("FP1-F7", "F7-T7", "T7-P7", "P7-O1",
                          "FP2-F8", "F8-T8", "T8-P8", "P8-O2"),
@@ -65,6 +71,11 @@ class APITests(unittest.TestCase):
         response = self.client().get("/model-info")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["task"], "binary_seizure_detection")
+        self.assertEqual(response.json()["training_cases"], ["chb01", "chb02"])
+        self.assertEqual(response.json()["training_subjects"], ["subject_chb01_chb21", "chb02"])
+        self.assertEqual(response.json()["held_out_cases"], ["chb03"])
+        self.assertEqual(response.json()["held_out_subjects"], ["chb03"])
+        self.assertNotIn("training_patients", response.json())
         self.assertFalse(response.json()["clinical_validation"])
 
     def test_predict_accepts_valid_eeg_payload(self):
