@@ -113,22 +113,43 @@ class StreamingEEGSession:
     def __init__(self, detector: NeuroGuardDetector, start_seconds: float = 0.0):
         self.detector = detector
         self.start_seconds = float(start_seconds)
+        if not np.isfinite(self.start_seconds) or self.start_seconds < 0:
+            raise ValueError("start_seconds must be nonnegative and finite")
+        self.next_packet_seconds = self.start_seconds
         self.buffer = np.empty((len(detector.config.channels), 0), dtype=np.float64)
         self.closed = False
 
-    def push(self, samples: np.ndarray, channels: list[str], sfreq: float, *, unit: str) -> list[dict]:
+    def push(self, samples: np.ndarray, channels: list[str], sfreq: float, *,
+             unit: str, packet_start_seconds: float) -> list[dict]:
+        """Append one packet whose timestamp must follow the previous packet exactly.
+
+        packet_start_seconds is the time of the first sample in this packet,
+        relative to the beginning of the EDF/session. Packets with gaps,
+        overlaps, or out-of-order timestamps are rejected.
+        """
         if self.closed:
             raise ValueError("Stream already finalized")
         if unit != "V" or not np.isclose(sfreq, self.detector.config.sfreq):
             raise ValueError("Streaming EEG requires explicit volts and matching sampling rate")
+        if not np.isfinite(packet_start_seconds) or packet_start_seconds < 0:
+            raise ValueError("packet_start_seconds must be nonnegative and finite")
+        if not np.isclose(packet_start_seconds, self.next_packet_seconds,
+                          rtol=0.0, atol=0.5 / self.detector.config.sfreq):
+            raise ValueError(
+                f"Non-contiguous EEG packet: expected start at {self.next_packet_seconds:.9f}s, "
+                f"received {packet_start_seconds:.9f}s"
+            )
         x = np.asarray(samples, dtype=np.float64)
         if x.ndim != 2 or x.shape[0] != len(channels):
             raise ValueError("Streaming samples must have shape channels x time")
         actual = select_channels(channels, self.detector.config)
         ordered = x[[channels.index(name) for name in actual], :]
+        if ordered.shape[1] == 0:
+            raise ValueError("Streaming EEG packet must contain at least one sample")
         if not np.isfinite(ordered).all():
             raise ValueError("Streaming EEG contains NaN or Infinity")
         self.buffer = np.concatenate((self.buffer, ordered), axis=1)
+        self.next_packet_seconds = packet_start_seconds + ordered.shape[1] / self.detector.config.sfreq
         n = self.buffer.shape[1] // self.detector.config.samples_per_window
         outputs = []
         length = self.detector.config.samples_per_window
