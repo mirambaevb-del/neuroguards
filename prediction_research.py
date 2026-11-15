@@ -92,7 +92,7 @@ def candidate_preictal_label(start: float, end: float,
     # If a seizure occurs within the future outer horizon but this window did
     # not qualify as a complete preictal window, its class is ambiguous, not 0.
     future_end = end + protocol.outer_horizon_seconds
-    if any(end < onset <= future_end for onset, _ in seizures):
+    if any(end <= onset <= future_end for onset, _ in seizures):
         return None
 
     # A true negative needs full continuous EEG + annotation coverage through
