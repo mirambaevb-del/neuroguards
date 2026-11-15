@@ -80,10 +80,19 @@ def event_metrics(records: list[dict], metadata: list[dict], y: np.ndarray,
         zip(metadata, y, prediction),
         key=lambda item: (item[0]["file"], item[0]["start_seconds"]),
     )
+    previous_by_file = {}
+    tolerance = 1e-9
     for m, _, _ in ordered:
         start, end = float(m["start_seconds"]), float(m["end_seconds"])
         if not np.isfinite(start) or not np.isfinite(end) or start < 0 or end <= start:
             raise ValueError("metadata must contain finite, valid window timestamps")
+        if not np.isclose(end - start, config.window_seconds, rtol=0.0, atol=tolerance):
+            raise ValueError("each metadata window must match config.window_seconds")
+        filename = m["file"]
+        previous_end = previous_by_file.get(filename)
+        if previous_end is not None and start < previous_end - tolerance:
+            raise ValueError("metadata windows must not overlap or duplicate within an EDF file")
+        previous_by_file[filename] = end
 
     false_alarms = 0
     previous_file, previous_end, previous_positive = None, None, False
