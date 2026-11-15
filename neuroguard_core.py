@@ -119,13 +119,44 @@ def parse_summary(text: str) -> dict[str, dict]:
     return records
 
 
-def label_window(start: float, end: float, intervals: list[tuple[float, float]]) -> int | None:
-    """Return 1 for fully ictal, 0 for fully interictal, None for boundary-crossing."""
+POSTICTAL_EXCLUSION_SECONDS = 30 * 60  # Research protocol choice; not a clinical standard.
+
+
+def label_window(start: float, end: float, intervals: list[tuple[float, float]],
+                 postictal_exclusion_seconds: float = POSTICTAL_EXCLUSION_SECONDS) -> int | None:
+    """Return 1=fully ictal, 0=verified interictal, None=excluded/ambiguous.
+
+    Windows overlapping the configured postictal interval [seizure_end,
+    seizure_end + exclusion) are excluded rather than mislabeled interictal.
+    The 30-minute default is an explicit research-protocol choice and must not
+    be presented as a clinically established recovery period.
+    """
+    if (not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start):
+        raise ValueError("Invalid window timestamps")
+    if (not math.isfinite(postictal_exclusion_seconds) or
+            postictal_exclusion_seconds < 0):
+        raise ValueError("Postictal exclusion must be finite and non-negative")
+
+    previous_offset = -math.inf
+    for onset, offset in intervals:
+        if (not math.isfinite(onset) or not math.isfinite(offset) or
+                onset < 0 or offset <= onset or onset < previous_offset):
+            raise ValueError("Seizure intervals must be valid, sorted and non-overlapping")
+        previous_offset = offset
+
+    # Ictal labels take precedence only for windows fully contained in an event.
     for onset, offset in intervals:
         if start >= onset and end <= offset:
             return 1
         if start < offset and end > onset:
             return None
+
+    # Any overlap with the postictal exclusion interval is unknown, not negative.
+    if postictal_exclusion_seconds > 0 and any(
+        start < offset + postictal_exclusion_seconds and end > offset
+        for _, offset in intervals
+    ):
+        return None
     return 0
 
 
