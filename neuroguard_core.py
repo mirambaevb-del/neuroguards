@@ -343,26 +343,76 @@ def split_records(records: list[dict]) -> tuple[list[dict], list[dict]]:
     return train, test
 
 
+# PhysioNet documents CHB-MIT cases chb01 and chb21 as recordings from
+# the same participant, acquired approximately 1.5 years apart. Keep them
+# together for participant-independent evaluation.
+SUBJECT_ID_BY_CASE = {
+    "chb01": "subject_chb01_chb21",
+    "chb21": "subject_chb01_chb21",
+}
+
+
+def subject_id_for_case(patient_id: str) -> str:
+    case_id = str(patient_id).strip().lower()
+    return SUBJECT_ID_BY_CASE.get(case_id, case_id)
+
+
 def split_records_three_way(records: list[dict],
                             split_patients: dict[str, list[str]] | None = None
                             ) -> tuple[list[dict], list[dict], list[dict]]:
-    """Disjoint patient-level train/validation/test; no window-level shuffling.
+    """Disjoint participant-level train/validation/test; no window shuffling.
 
-    When no explicit split is supplied, deterministically hold out the last
-    two patient IDs. The resulting proposal MUST be reviewed after data audit.
+    Explicit split lists contain CHB-MIT case IDs (chbXX), but all cases
+    belonging to one real participant must remain in the same partition.
     """
-    available = sorted({r["patient"] for r in records})
-    if len(available) < 3:
-        raise ValueError("Need at least 3 distinct patients for train/validation/test")
-    chosen = split_patients or {"train": available[:-2],
-                                "validation": [available[-2]], "test": [available[-1]]}
-    if set(chosen) != {"train", "validation", "test"}:
-        raise ValueError("Split must define train, validation and test groups")
+    available = sorted({str(r["patient"]).strip().lower() for r in records})
+    if not available:
+        raise ValueError("No patient records are available")
+    subject_to_cases: dict[str, list[str]] = {}
+    for case_id in available:
+        subject_to_cases.setdefault(subject_id_for_case(case_id), []).append(case_id)
+    subject_groups = sorted(subject_to_cases)
+    if len(subject_groups) < 3:
+        raise ValueError("Need at least 3 distinct participants for train/validation/test")
+
+    if split_patients is None:
+        train_subjects = subject_groups[:-2]
+        validation_subjects = [subject_groups[-2]]
+        test_subjects = [subject_groups[-1]]
+        chosen = {
+            "train": [case for subject in train_subjects for case in subject_to_cases[subject]],
+            "validation": subject_to_cases[validation_subjects[0]],
+            "test": subject_to_cases[test_subjects[0]],
+        }
+    else:
+        if not isinstance(split_patients, dict) or set(split_patients) != {"train", "validation", "test"}:
+            raise ValueError("Split must define exactly train, validation and test groups")
+        chosen = {}
+        for name in ("train", "validation", "test"):
+            cases = split_patients[name]
+            if not isinstance(cases, list) or not cases or any(
+                    not isinstance(case, str) or not case.strip() for case in cases):
+                raise ValueError(f"Split group {name!r} must be a non-empty list of case IDs")
+            normalized = [case.strip().lower() for case in cases]
+            if len(normalized) != len(set(normalized)):
+                raise ValueError(f"Split group {name!r} contains duplicate case IDs")
+            chosen[name] = normalized
+
     sets = [set(chosen[name]) for name in ("train", "validation", "test")]
     if any(not group for group in sets):
-        raise ValueError("Every split must contain at least one patient")
+        raise ValueError("Every split must contain at least one case")
     if any(a & b for i, a in enumerate(sets) for b in sets[i + 1:]):
-        raise ValueError("Patient leakage between dataset splits")
+        raise ValueError("Case leakage between dataset splits")
     if set.union(*sets) != set(available):
-        raise ValueError("Split does not cover exactly the audited patient IDs")
-    return tuple([r for r in records if r["patient"] in group] for group in sets)
+        raise ValueError("Split does not cover exactly the audited case IDs")
+
+    partition_subjects = [
+        {subject_id_for_case(case_id) for case_id in group}
+        for group in sets
+    ]
+    if any(a & b for i, a in enumerate(partition_subjects)
+           for b in partition_subjects[i + 1:]):
+        raise ValueError("Participant leakage: related CHB-MIT cases cross dataset splits")
+
+    return tuple([r for r in records
+                  if str(r["patient"]).strip().lower() in group] for group in sets)

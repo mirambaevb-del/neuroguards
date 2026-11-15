@@ -1,0 +1,35 @@
+name: Unit tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  prediction-label-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run fast label tests
+        run: python -m unittest discover -s tests -p 'test_prediction_research.py' -v
+
+  project-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run project unit tests
+        run: python -m unittest discover -s tests -v

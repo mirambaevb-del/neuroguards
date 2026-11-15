@@ -24,7 +24,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.base import clone
 
 from neuroguard_core import (Config, VERSION, discover_recordings, feature_names,
-                             iter_record_windows, split_records_three_way)
+                             iter_record_windows, split_records_three_way, subject_id_for_case)
 
 
 def write_json(path: Path, content: dict) -> None:
@@ -52,14 +52,21 @@ def event_metrics(records: list[dict], metadata: list[dict], y: np.ndarray,
     windows. Exposure denominator excludes ictal and boundary windows.
     """
     all_events = [(r["file"], onset, offset) for r in records for onset, offset in r["seizures"]]
-    latencies, hits = [], 0
+    latencies, hits, scorable_events = [], 0, 0
     for filename, onset, offset in all_events:
-        positive_ends = [m["end_seconds"] for m, p in zip(metadata, prediction)
-                         if p == 1 and m["file"] == filename and
-                         m["start_seconds"] >= onset and m["end_seconds"] <= offset]
+        fully_ictal_windows = [
+            (m, p) for m, p in zip(metadata, prediction)
+            if m["file"] == filename and
+            m["start_seconds"] >= onset and m["end_seconds"] <= offset
+        ]
+        if not fully_ictal_windows:
+            continue
+        scorable_events += 1
+        positive_ends = [m["end_seconds"] for m, p in fully_ictal_windows if p == 1]
         if positive_ends:
             hits += 1
             latencies.append(min(positive_ends) - onset)
+    unscorable_events = len(all_events) - scorable_events
     false_alarms = 0
     previous_file, previous_start, previous_positive = None, None, False
     for m, target, pred in zip(metadata, y, prediction):
@@ -73,9 +80,15 @@ def event_metrics(records: list[dict], metadata: list[dict], y: np.ndarray,
         previous_file, previous_start = m["file"], m["start_seconds"]
     exposure_h = np.sum(y == 0) * config.window_seconds / 3600.0
     return {
-        "annotated_events": len(all_events), "detected_events": hits,
-        "missed_events": len(all_events) - hits,
-        "event_sensitivity": hits / len(all_events) if all_events else None,
+        "annotated_events": len(all_events),
+        "scorable_events": scorable_events,
+        "unscorable_events": unscorable_events,
+        "detected_events": hits,
+        "missed_scorable_events": scorable_events - hits,
+        "missed_events": scorable_events - hits,
+        "event_sensitivity_all_annotated": hits / len(all_events) if all_events else None,
+        "event_sensitivity_scorable": hits / scorable_events if scorable_events else None,
+        "event_sensitivity": hits / scorable_events if scorable_events else None,
         "latency_seconds_from_onset_to_window_end": latencies,
         "median_detection_latency_seconds": float(np.median(latencies)) if latencies else None,
         "false_alarm_runs": false_alarms,
@@ -103,7 +116,8 @@ def evaluate(model, x: np.ndarray, y: np.ndarray, metadata: list[dict],
         "true_negatives": tn, "false_positives": fp, "false_negatives": fn, "true_positives": tp,
         "roc_auc": float(roc_auc_score(y, scores)) if len(np.unique(y)) == 2 else None,
         "pr_auc_average_precision": float(average_precision_score(y, scores)) if len(np.unique(y)) == 2 else None,
-        "held_out_patients": sorted({m["patient"] for m in metadata}),
+        "held_out_cases": sorted({m["patient"] for m in metadata}),
+        "held_out_subjects": sorted({subject_id_for_case(m["patient"]) for m in metadata}),
         "n_test_windows": len(y),
         "scores_are_calibrated_probabilities": False,
         "event_metrics": event_metrics(records, metadata, y, pred, config),
@@ -112,7 +126,8 @@ def evaluate(model, x: np.ndarray, y: np.ndarray, metadata: list[dict],
 
 
 def save_plots(results: Path, model, x: np.ndarray, y: np.ndarray, scores: np.ndarray,
-               comparison: dict, first_record: dict | None = None):
+               comparison: dict, first_record: dict | None = None,
+               held_out_patients: list[str] | None = None):
     disp = ConfusionMatrixDisplay.from_predictions(y, model.predict(x), labels=[0, 1],
                                                    display_labels=["Interictal", "Ictal"], cmap="Blues")
     disp.figure_.savefig(results / "confusion_matrix.png", dpi=150, bbox_inches="tight")
@@ -120,7 +135,8 @@ def save_plots(results: Path, model, x: np.ndarray, y: np.ndarray, scores: np.nd
     if len(np.unique(y)) == 2:
         fpr, tpr, _ = roc_curve(y, scores)
         plt.figure()
-        plt.plot(fpr, tpr, label="Held-out CHB03")
+        patient_label = ", ".join(held_out_patients or []) or "unspecified patients"
+        plt.plot(fpr, tpr, label=f"Held-out patients: {patient_label}")
         plt.plot([0, 1], [0, 1], "--", color="gray")
         plt.xlabel("False positive rate"); plt.ylabel("True positive rate")
         plt.legend(); plt.tight_layout()
@@ -158,6 +174,7 @@ def main():
     parser.add_argument("--data", default="/content/neuroguard_data")
     parser.add_argument("--out", default=str(Path(__file__).resolve().parent))
     parser.add_argument("--train", action="store_true", help="Fit models only if real labeled EDF data exists")
+    parser.add_argument("--split-json", help="Optional JSON file with disjoint train/validation/test patient lists")
     args = parser.parse_args()
     out = Path(args.out).resolve()
     results, model_dir = out / "results", out / "model"
@@ -171,12 +188,20 @@ def main():
         return
     if audit["status"] != "audited" or audit["rejected_recordings"]:
         raise SystemExit("Cannot train: missing/invalid data or rejected recordings. Review results/dataset_audit.json.")
-    train_records, val_records, test_records = split_records_three_way(audit["accepted_recordings"])
+    split_patients = None
+    if args.split_json:
+        with Path(args.split_json).open("r", encoding="utf-8") as handle:
+            split_patients = json.load(handle)
+        if (not isinstance(split_patients, dict) or
+                set(split_patients) != {"train", "validation", "test"}):
+            raise SystemExit("--split-json must define exactly train, validation and test lists")
+    train_records, val_records, test_records = split_records_three_way(
+        audit["accepted_recordings"], split_patients=split_patients)
     split_ids = {"train": sorted({r["patient"] for r in train_records}),
                  "validation": sorted({r["patient"] for r in val_records}),
                  "test": sorted({r["patient"] for r in test_records})}
     write_json(results / "patient_split.json", {"patients": split_ids,
-                                                "method": "Deterministic proposal chosen after EDF audit",
+                                                "method": "User-supplied participant-aware case split" if split_patients is not None else "Deterministic participant-aware proposal chosen after EDF audit",
                                                 "warning": "Review suitability; only 3 patients gives very weak external validation"})
     x_train, y_train, metadata_train, rejected_train = load_feature_matrix(train_records, config)
     x_val, y_val, metadata_val, rejected_val = load_feature_matrix(val_records, config)
@@ -224,8 +249,10 @@ def main():
     write_json(model_dir / "features.json", {"feature_names": feature_names(config), "version": VERSION,
                                                 "class_labels": {"0": "INTERICTAL", "1": "ICTAL"}})
     write_json(model_dir / "manifest.json", {"version": VERSION, "trained_utc": datetime.now(timezone.utc).isoformat(),
-                                                "training_patients": split_ids["train"] + split_ids["validation"],
-                                                "held_out_patients": split_ids["test"], "validation_patients": split_ids["validation"],
+                                                "training_cases": split_ids["train"] + split_ids["validation"],
+                                                "held_out_cases": split_ids["test"], "validation_cases": split_ids["validation"],
+                                                "training_subjects": sorted({subject_id_for_case(r["patient"]) for r in train_records + val_records}),
+                                                "held_out_subjects": sorted({subject_id_for_case(r["patient"]) for r in test_records}),
                                                 "selected_model": best_name, "model_sha256": model_hash,
                                                 "selection": "Choose best validation macro F1, refit train+val, evaluate test once",
                                                 "python_version": platform.python_version(),
@@ -235,7 +262,8 @@ def main():
     write_json(results / "validation_comparison.json", validation_comparison)
     write_json(results / "test_metrics.json", test_metrics)
     save_plots(results, chosen, x_test, y_test, chosen_scores, validation_comparison,
-               next((r for r in test_records if r["seizures"]), None))
+               next((r for r in test_records if r["seizures"]), None),
+               held_out_patients=split_ids["test"])
     print(f"Saved trained model and actual held-out metrics to {out}")
 
 
