@@ -78,5 +78,30 @@ class NotebookContractTests(unittest.TestCase):
         )
 
 
+    def test_generator_reproduces_published_notebook(self):
+        import subprocess
+        import sys
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            generated = Path(temp_dir) / "NeuroGuard_AI_Final.ipynb"
+            subprocess.run(
+                [sys.executable, str(ROOT / "make_notebook.py"), "--output", str(generated)],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            published = json.loads(
+                (ROOT / "NeuroGuard_AI_Final.ipynb").read_text(encoding="utf-8")
+            )
+            rebuilt = json.loads(generated.read_text(encoding="utf-8"))
+            self.assertEqual(
+                rebuilt,
+                published,
+                "make_notebook.py output differs from the checked-in Colab notebook",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
