@@ -1,5 +1,6 @@
 """API tests with a deterministic fake detector; no trained model or EEG data required."""
 import os
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -77,6 +78,15 @@ class APITests(unittest.TestCase):
         self.assertEqual(response.json()["held_out_subjects"], ["chb03"])
         self.assertNotIn("training_patients", response.json())
         self.assertFalse(response.json()["clinical_validation"])
+    
+    def test_model_info_split_fields_match_training_manifest_schema(self):
+        root = Path(__file__).resolve().parents[1]
+        training_source = (root / "train.py").read_text(encoding="utf-8")
+        api_source = (root / "api.py").read_text(encoding="utf-8")
+        for field in ("training_cases", "training_subjects", "held_out_cases", "held_out_subjects"):
+            with self.subTest(field=field):
+                self.assertIn(f'"{field}"', training_source)
+                self.assertIn(f'"{field}"', api_source)
 
     def test_predict_accepts_valid_eeg_payload(self):
         response = self.client().post("/predict", json=VALID_PAYLOAD)
