@@ -24,7 +24,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.base import clone
 
 from neuroguard_core import (Config, VERSION, discover_recordings, feature_names,
-                             iter_record_windows, split_records_three_way)
+                             iter_record_windows, split_records_three_way, subject_id_for_case)
 
 
 def write_json(path: Path, content: dict) -> None:
@@ -115,7 +115,8 @@ def evaluate(model, x: np.ndarray, y: np.ndarray, metadata: list[dict],
         "true_negatives": tn, "false_positives": fp, "false_negatives": fn, "true_positives": tp,
         "roc_auc": float(roc_auc_score(y, scores)) if len(np.unique(y)) == 2 else None,
         "pr_auc_average_precision": float(average_precision_score(y, scores)) if len(np.unique(y)) == 2 else None,
-        "held_out_patients": sorted({m["patient"] for m in metadata}),
+        "held_out_cases": sorted({m["patient"] for m in metadata}),
+        "held_out_subjects": sorted({subject_id_for_case(m["patient"]) for m in metadata}),
         "n_test_windows": len(y),
         "scores_are_calibrated_probabilities": False,
         "event_metrics": event_metrics(records, metadata, y, pred, config),
@@ -249,8 +250,8 @@ def main():
     write_json(model_dir / "manifest.json", {"version": VERSION, "trained_utc": datetime.now(timezone.utc).isoformat(),
                                                 "training_cases": split_ids["train"] + split_ids["validation"],
                                                 "held_out_cases": split_ids["test"], "validation_cases": split_ids["validation"],
-                                                "training_subjects": sorted({r["patient"] for r in train_records + val_records}),
-                                                "held_out_subject_groups": sorted({__import__("neuroguard_core").subject_id_for_case(r["patient"]) for r in test_records}),
+                                                "training_subjects": sorted({subject_id_for_case(r["patient"]) for r in train_records + val_records}),
+                                                "held_out_subjects": sorted({subject_id_for_case(r["patient"]) for r in test_records}),
                                                 "selected_model": best_name, "model_sha256": model_hash,
                                                 "selection": "Choose best validation macro F1, refit train+val, evaluate test once",
                                                 "python_version": platform.python_version(),
